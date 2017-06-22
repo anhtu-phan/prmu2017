@@ -53,8 +53,9 @@ def train():
 		print("Learning rate: %f"%learning_rate)
 		avg_ttl = 0
 		#shuffle data
-		p = np.random.permutation(nb_images_train)
-		#print("img_train "+str(p))
+		p = np.random.permutation(read_data.nb_images)
+		print("p_size = " +str(p.shape))
+		print("img_train "+str(p[:nb_images_train]))
 		#avg_rgl = []
 		if epoch % 10 == 0 :
 			saver.save(sess,"save/current/model.ckpt")
@@ -69,6 +70,7 @@ def train():
 			ttl, _ = sess.run([total_loss,train_step],
 
 									feed_dict = {x:x_batch, y_label:y_batch, keep_prob_fc1: (1 - drop_out_prob)})
+			print("cross_entropy_loss of batch "+str(i)+" = "+str(ttl))
 			avg_ttl += ttl*(end_image -  first_image)
 
 		#avg_rgl = np.average(avg_rgl)
