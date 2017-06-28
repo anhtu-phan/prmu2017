@@ -1,191 +1,213 @@
-import numpy as np
 import tensorflow as tf
+import numpy as np
+from read_dataset import PRMUDataSet
+import os
 
-image_size = 96
-nb_chanels = 1
-nb_classes = 46
-lamb = 0.0
-init_learning_rate = 0.005
+train_sets = PRMUDataSet("1_train_0.9")
+train_sets.load_data_target()
+n_train_samples = train_sets.get_n_types_target()
+print ("n_train_samples = "+str(n_train_samples))
 
-# 
-def set_weight_conv_variable(shape_covn, name):
-	std = shape_covn[0] * shape_covn[1] * shape_covn[2]
-	std = np.sqrt(2. / std)
-	initial_conv = tf.truncated_normal(shape=shape_covn,stddev=std, mean=0.0)
-	return tf.Variable(initial_conv,name=name)
 
-def set_weight_fc_variable(shape_fc, name):
-	std = shape_fc[0]
-	std = np.sqrt(2. / std)
-	initial_fc = tf.truncated_normal(shape=shape_fc, stddev=std, mean=0.0)
-	return tf.Variable(initial_fc, name=name)
+valid_sets = PRMUDataSet('1_test_0.9')
+valid_sets.load_data_target()
+n_valid_samples = valid_sets.get_n_types_target()
+print("n_valid_samples = "+str(n_valid_samples))
 
-def set_bias_variable(shape_bias, name):
-	initial_bias = tf.constant(0., shape = shape_bias)
-	return tf.Variable(initial_bias,name=name)
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
-def flatten(x):
-	dim = x.get_shape().as_list()
-	dim = np.prod(dim[1:])
-	#dime = dim
-	x = tf.reshape(x, [-1, dim])
-	return x, dim
+img_size = 96
+started_learning_rate = 0.0005
+nb_epochs = 1000
+batch_size = 256 
+drop_out_prob = 0.5
+#lamb = 0.01
 
-def conv2d(x, W, stride, padding_type='SAME'):
-	return tf.nn.conv2d(x, W, [1,stride,stride, 1], padding_type)
+def new_weights(shape,name):
+    initial = tf.truncated_normal(shape=shape, stddev=0.001, mean=0.0)
+    return tf.Variable(initial, name=name)
 
-def max_pool(x, filter, stride, padding_type='SAME'):
-	return tf.nn.max_pool(x, [1,filter,filter,1], [1,stride,stride,1], padding_type)
+def new_bias(shape, name):
+    initial = tf.constant(0.0, shape=shape)
+    return tf.Variable(initial, name=name)
 
-def input() :
-	x = tf.placeholder(tf.float32, [None, image_size, image_size, nb_chanels])
-	y_label = tf.placeholder(tf.float32,[None, nb_classes])
+def new_conv2d(pre_layer, filter_size, nb_chanels_input, nb_filters, n_scope, relu=True):
+    with tf.variable_scope(n_scope) as scope:
+        shape = [filter_size,filter_size,nb_chanels_input,nb_filters]
+        weight = new_weights(shape=shape, name='W')
+        bias = new_bias(shape=[nb_filters], name='b')
 
-	tf.add_to_collection('x',x)
-	tf.add_to_collection('y_label',y_label)
-	return x, y_label
+        layer = tf.nn.conv2d(input=pre_layer, filter=weight, strides=[1,1,1,1], padding='SAME')
+
+        layer += bias
+
+        if relu :
+            layer = tf.nn.relu(layer,name=scope.name)
+
+        return layer, weight
+
+def new_maxpool2d(x, k=2):
+    return tf.nn.max_pool(x, ksize=[1,k,k,1], strides=[1,k,k,1], padding='SAME')
+
+def flatten_layer(layer):
+    layer_shape = layer.get_shape()
+    nb_dim = layer_shape[1:4].num_elements()
+
+    layer_flat = tf.reshape(layer,[-1,nb_dim])
+
+    return layer_flat, nb_dim
+
+def new_fc_layer(pre_layer, nb_inputs, nb_outputs, n_scope, relu = True):
+    with tf.variable_scope(n_scope) as scope :
+        weight = new_weights(shape=[nb_inputs,nb_outputs], name='W')
+        bias = new_bias(shape=[nb_outputs], name='b')
+
+        layer = tf.matmul(pre_layer,weight) + bias
+
+        if relu :
+            layer = tf.nn.relu(layer, name=scope.name)
+     
+    	return layer, weight
+
+keep_prob_fc1 = tf.placeholder(tf.float32)
+keep_prob_fc2 = tf.placeholder(tf.float32)
 
 def inference(x):
+    x_image = tf.reshape(x,[-1, img_size, img_size, 1])
+    #print('x_image = '+str(x_image.get_shape()))
+    #l2_loss = tf.constant(0.0,dtype=tf.float32)
 
-	x_image = tf.reshape(x, [-1,image_size,image_size,nb_chanels])
-	#print("x_image : " + str(x_image.get_shape()))
-	##print x_image.get_shape()
-	#weights = []
+    conv1, W_conv1 = new_conv2d(pre_layer=x_image, filter_size=3, nb_chanels_input=1, nb_filters=32, relu=False, n_scope='conv1')
+    #print('conv1 = '+str(conv1.get_shape())+"   W_conv1 = "+str(W_conv1.get_shape()))
+    #l2_loss += tf.nn.l2_loss(W_conv1)
 
-	#Block 1
-	depth1 = 32
-	with tf.variable_scope('conv1') as scope:
-		W_conv1 = set_weight_conv_variable([3,3,nb_chanels,depth1],'w')
-		#weights.append(W_conv1)
-		b_conv1 = set_bias_variable([depth1],'b')
-		h_conv1 = conv2d(x_image,W_conv1,1) + b_conv1
-		h_conv1 = tf.nn.relu(h_conv1, name=scope.name)
+    conv1 = new_maxpool2d(conv1)
+    #print('conv1_pool = '+str(conv1.get_shape()))
 
-	#print("h_conv1 : "+str(h_conv1.get_shape()))
-	h_pool1 = max_pool(h_conv1,2,2)
-	#print("h_pool1 : " + str(h_pool1.get_shape()))
-	
-	#Block 2
-	depth2 = 64
-	with tf.variable_scope('conv2') as scope:
-		W_conv2 = set_weight_conv_variable([3,3,depth1, depth2],'w')
-		#weights.append(W_conv2)
-		b_conv2 = set_bias_variable([depth2],'b')
-		h_conv2 = conv2d(h_pool1,W_conv2,1) + b_conv2
-		h_conv2 = tf.nn.relu(h_conv2, name=scope.name)
+    conv2, W_conv2 = new_conv2d(pre_layer=conv1, filter_size=3, nb_chanels_input=32, nb_filters=32, relu=False, n_scope='conv2')
+    #print('conv2 = '+str(conv2.get_shape())+"   W_conv2 = "+str(W_conv2.get_shape()))
+    #l2_loss += tf.nn.l2_loss(W_conv2)
 
-	#print("h_conv2 : "+str(h_conv2.get_shape()))
-	h_pool2 = max_pool(h_conv2,2,2)
-	#print("h_pool2 : "+str(h_pool2.get_shape()))
+    conv2 = new_maxpool2d(conv2)
+    #print('conv2_pool = '+str(conv2.get_shape()))
 
-	#Block 3
-	depth3 = 128
-	with tf.variable_scope('conv3') as scope:
-		W_conv3 = set_weight_conv_variable([3,3,depth2,depth3],'w')
-		#weights.append(W_conv3)
-		b_conv3 = set_bias_variable([depth3],'b')
-		h_conv3 = conv2d(h_pool2,W_conv3,1) + b_conv3
-		h_conv3 = tf.nn.relu(h_conv3, name=scope.name)
+    conv3, W_conv3 = new_conv2d(pre_layer=conv2, filter_size=3, nb_chanels_input=32, nb_filters=64, relu=False, n_scope='conv3')
+    #print('conv3 = '+str(conv3.get_shape())+"   W_conv3 = "+str(W_conv3.get_shape()))
+    #l2_loss += tf.nn.l2_loss(W_conv3)
 
-	#print("h_conv3 : "+str(h_conv3.get_shape()))
+    conv3 = new_maxpool2d(conv3)
+    #print('conv3_pool = '+str(conv3.get_shape()))
 
-	with tf.variable_scope('conv4') as scope:
-		W_conv4 = set_weight_conv_variable([3,3,depth3,depth3],'w')
-		#weights.append(W_conv4)
-		b_conv4 = set_bias_variable([depth3],'b')
-		h_conv4 = conv2d(h_conv3,W_conv4,1) + b_conv4
-		h_conv4 = tf.nn.relu(h_conv4, name=scope.name)
+    conv4, W_conv4 = new_conv2d(pre_layer=conv3, filter_size=3, nb_chanels_input=64, nb_filters=64, relu=False, n_scope='conv4')
+    #print('conv4 = '+str(conv4.get_shape())+"   W_conv4="+str(W_conv4.get_shape()))
+    #l2_loss += tf.nn.l2_loss(W_conv4)
 
-	#print("h_conv4 : "+str(h_conv4.get_shape()))
-	h_pool3 = max_pool(h_conv4,2,2)
-	#print("h_pool3 : "+str(h_pool3.get_shape()))
+    conv4 = new_maxpool2d(conv4)
+    #print('conv4_pool = '+str(conv4.get_shape()))
+    
+    conv5, W_conv5 = new_conv2d(pre_layer=conv4, filter_size=3, nb_chanels_input=64, nb_filters=128, relu=False, n_scope='conv5')
+    #print('conv5 = '+str(conv5.get_shape())+"   W_conv5="+str(W_conv5.get_shape()))
+    #l2_loss += tf.nn.l2_loss(W_conv5)
 
-	#Block 4 
-	depth4 = 256
-	with tf.variable_scope('conv5') as scope:
-		W_conv5 = set_weight_conv_variable([3,3,depth3,depth4],'w')
-		#weights.append(W_conv5)
-		b_conv5 = set_bias_variable([depth4],'b')
-		h_conv5 = conv2d(h_pool3,W_conv5,1) + b_conv5
-		h_conv5 = tf.nn.relu(h_conv5, name=scope.name)
+    conv5 = new_maxpool2d(conv5)
+    #print('conv5_pool = '+str(conv5.get_shape()))
 
-	#print("h_conv5 : "+str(h_conv5.get_shape()))
+    layer_flat, nb_dim = flatten_layer(conv5)
+    #print('layer_flat = '+str(layer_flat.get_shape())+'     nb_dim = '+str(nb_dim))
 
-	with tf.variable_scope('conv6') as scope:
-		W_conv6 = set_weight_conv_variable([3,3,depth4,depth4],'w')
-		#weights.append(W_conv6)
-		b_conv6 = set_bias_variable([depth4],'b')
-		h_conv6 = conv2d(h_conv5,W_conv6,1) + b_conv6
-		h_conv6 = tf.nn.relu(h_conv6, name=scope.name)
+    fc1, W_fc1 = new_fc_layer(pre_layer=layer_flat, nb_inputs=nb_dim, nb_outputs= 4096, n_scope='fc1')
+    #print('fc1 = '+str(fc1.get_shape()))
+    #l2_loss += tf.nn.l2_loss(W_fc1)
 
-	#print("h_conv6 : "+str(h_conv6.get_shape()))
-	h_pool4 = max_pool(h_conv6,2,2)
-	#print("h_pool4 : "+str(h_pool4.get_shape()))
+    fc1_drop = tf.nn.dropout(fc1, keep_prob_fc1)
+    #print('fc1_drop = '+fc1_drop.get_shape())
 
-	#Block 5
-	'''depth5 = 512
-	with tf.variable_scope('conv7') as scope:
-		W_conv7 = set_weight_conv_variable([3,3,depth4,depth5],'w')
-		#weights.append(W_conv7)
-		b_conv7 = set_bias_variable([depth5],'b')
-		h_conv7 = conv2d(h_pool4,W_conv7,1) + b_conv7
-		h_conv7 = tf.nn.relu(h_conv7, name=scope.name)
+    fc2, W_fc2 = new_fc_layer(pre_layer=fc1_drop, nb_inputs=4096, nb_outputs=4096, n_scope='fc2')
+    #print('fc2 = '+fc2.get_shape())
+    #l2_loss += tf.nn.l2_loss(W_fc2)
 
-	##print("h_conv7 : "+str(h_conv7.get_shape()))
-	h_pool5 = max_pool(h_conv7,2,2)
-	##print("h_pool5 : "+str(h_pool5.get_shape()))
-	'''
-	#Fully-connected layer 1
-	h_pool_flat, size_weight = flatten(h_pool4)
-	#print("h_pool_flat : "+str(h_pool_flat)+"  size_weight : "+str(size_weight))
+    fc2_drop = tf.nn.dropout(fc2, keep_prob_fc2)
+    #print('fc2_drop = '+fc2_drop.get_shape())
+    y_conv, W_softmax = new_fc_layer(pre_layer=fc2_drop, nb_inputs=4096, nb_outputs=46, relu= False, n_scope='softmax')
+    #print('y_conv = '+str(y_conv.get_shape()))
 
-	nb_neuron_fc1 = 128
-	with tf.variable_scope('fc1') as scope:
-		w_fc1 = set_weight_fc_variable([size_weight, nb_neuron_fc1],'w')
-		#weights.append(w_fc1)
-		b_fc1 = set_bias_variable([nb_neuron_fc1],'b')
-		h_fc1 = tf.matmul(h_pool_flat,w_fc1) + b_fc1
-		h_fc1 = tf.nn.relu(h_fc1,name = scope.name)
-		keep_prob_fc1 = tf.placeholder(tf.float32)
-		h_fc1_drop = tf.nn.dropout(h_fc1,keep_prob_fc1)
+    #l2_loss = lamb*l2_loss
 
-	#print("h_fc1_drop : "+str(h_fc1_drop.get_shape()))
+    return y_conv
 
-	#Softmax Layer
-	with tf.variable_scope('softmax') as scope:
-		w_softmax = set_weight_fc_variable([nb_neuron_fc1,nb_classes],'w')
-		#weights.append(w_softmax)
-		b_softmax = set_bias_variable([nb_classes],'b')
-		y_inference = tf.matmul(h_fc1_drop,w_softmax)+b_softmax
+x = tf.placeholder(tf.float32, [None, img_size, img_size, 1])
+y_ = tf.placeholder(tf.float32, [None, 46])
 
-	#print("y_inference : "+str(y_inference.get_shape()))
-	'''
-	regul_loss = tf.constant(0.0)
-	
-	for i in range(len(weights)):
-		regul_loss = tf.add(regul_loss, tf.nn.l2_loss(weights[i]))
-	regul_loss = regul_loss*lamb
-	'''
+y_conv = inference(x)
 
-	tf.add_to_collection('keep_prob_fc1', keep_prob_fc1)
-	tf.add_to_collection('y_inference', y_inference)
-	#tf.add_to_collection('regul_loss', regul_loss)
-	return y_inference
+loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y_, logits=y_conv))
 
-def loss(y_inference, y_label):
-	#regul_loss = tf.get_collection('regul_loss')[0]
-	cross_entropy = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels = y_label, logits = y_inference))
-	#total_loss = cross_entropy + regul_loss
+#loss = cross_entropy_loss + l2_loss
+#global_step = tf.contrib.framework.get_or_create_global_step()
+#learning_rate = tf.train.exponential_decay(started_learning_rate, global_step, 100000, 0.96, staircase=False)
 
-	#tf.add_to_collection("origin_loss", cross_entropy)
-	tf.add_to_collection('total_loss', cross_entropy)
-	return cross_entropy
+optimizer = tf.train.AdamOptimizer(learning_rate=started_learning_rate).minimize(loss)
 
-def train_op(loss):
-	#learning_rate = tf.Variable(init_learning_rate, dtype=tf.float32)
-	train_step = tf.train.MomentumOptimizer(learning_rate = init_learning_rate, momentum = 0.9).minimize(loss)
+correct_pred = tf.equal(tf.argmax(y_conv,1), tf.argmax(y_,1))
+true_pred = tf.reduce_sum(tf.cast(correct_pred,tf.float32))
 
-	tf.add_to_collection('train_step', train_step)
-	tf.add_to_collection('learning_rate', init_learning_rate)
+init = tf.global_variables_initializer()
 
-	return train_step
+'''
+saver = tf.train.Saver()
+save_dir = 'save/'
+if not os.path.exists(save_dir):
+    os.makedirs(save_dir)
+
+save_path = os.path.join(save_dir,'best_validation')
+'''
+with tf.Session() as sess:
+    #best_validation_accuracy = 0
+    sess.run(init)
+    for epoch in range(nb_epochs) :
+        print('Epoch '+str(epoch)+'/'+str(nb_epochs))
+        #print('learning rate: '+str(learning_rate.eval()))
+        perm = np.random.permutation(n_train_samples)
+        #perm2 = np.random.permutation(n_valid_samples)
+        tmp_loss = 0.0
+        nb_true_pred = 0.0
+        #tmp_l2_loss = []
+
+        for i in range(0, n_train_samples, batch_size):
+            x_batch = np.asarray(train_sets.data[perm[i:(i+batch_size)]])
+            batch_target = np.asarray(train_sets.target[perm[i:(i+batch_size)]])
+            y_batch = np.zeros((len(x_batch), 46), dtype=np.float32)
+            y_batch[np.arange(len(x_batch)), batch_target] = 1.0
+            #print('x_batch = '+str(x_batch.shape))
+            tmp_l,tmp_op = sess.run([loss,optimizer], feed_dict ={x: x_batch, y_: y_batch, keep_prob_fc1 : 1-drop_out_prob, keep_prob_fc2 : 1- drop_out_prob})
+
+            tmp_loss += float(tmp_l) * len(x_batch)
+            #tmp_l2_loss.append(tmp_l2_ls)
+            nb_true_pred += true_pred.eval(feed_dict={x: x_batch, y_: y_batch, keep_prob_fc1 : 1, keep_prob_fc2 : 1})
+
+        train_loss = tmp_loss/n_train_samples
+        #train_l2_loss = np.average(tmp_l2_loss)
+        train_acc = nb_true_pred/n_train_samples
+        #print('loss: '+str(train_loss)+' - l2-loss: '+str(train_l2_loss)+' - accurancy: '+str(train_acc))
+        print('loss: '+str(train_loss)+' - accurancy: '+str(train_acc))
+        
+        nb_valid_acc = 0.0
+        nb_valid_loss = 0.0
+        for i in range(0, n_valid_samples, batch_size):
+            x_batch = np.asarray(valid_sets.data[perm2[i:(i+batch_size)]])
+            batch_target = np.asarray(valid_sets.target[perm2[i:(i+batch_size)]])
+            y_batch = np.zeros((len(x_batch),46), dtype=np.float32)
+            y_batch[np.arange(len(x_batch)), batch_target] = 1.0
+
+            valid_loss = sess.run(loss, feed_dict={x: x_batch, y_: y_batch, keep_prob_fc1 : 1, keep_prob_fc2 : 1})
+            nb_valid_loss += float(valid_loss)*len(x_batch)
+            nb_valid_acc += true_pred.eval(feed_dict={x: x_batch, y_: y_batch, keep_prob_fc1 : 1, keep_prob_fc2 : 1})
+
+        nb_valid_acc = nb_valid_acc/n_valid_samples
+        nb_valid_loss = nb_valid_loss/n_valid_samples
+        print('valid_loss: '+str(nb_valid_loss)+' - valid_acc: '+str(nb_valid_acc))
+        
+        '''if nb_valid_acc > best_validation_accuracy :
+            best_validation_accuracy = nb_valid_acc
+            saver.save(sess=sess, save_path=save_path)'''
