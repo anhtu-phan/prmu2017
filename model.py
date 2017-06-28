@@ -22,7 +22,7 @@ started_learning_rate = 0.0005
 nb_epochs = 1000
 batch_size = 256 
 drop_out_prob = 0.5
-#lamb = 0.01
+lamb = 0.05
 
 def new_weights(shape,name):
     initial = tf.truncated_normal(shape=shape, stddev=0.001, mean=0.0)
@@ -76,39 +76,39 @@ keep_prob_fc2 = tf.placeholder(tf.float32)
 def inference(x):
     x_image = tf.reshape(x,[-1, img_size, img_size, 1])
     #print('x_image = '+str(x_image.get_shape()))
-    #l2_loss = tf.constant(0.0,dtype=tf.float32)
+    l2_loss = tf.constant(0.0,dtype=tf.float32)
 
-    conv1, W_conv1 = new_conv2d(pre_layer=x_image, filter_size=3, nb_chanels_input=1, nb_filters=32, relu=False, n_scope='conv1')
+    conv1, W_conv1 = new_conv2d(pre_layer=x_image, filter_size=3, nb_chanels_input=1, nb_filters=32, n_scope='conv1')
     #print('conv1 = '+str(conv1.get_shape())+"   W_conv1 = "+str(W_conv1.get_shape()))
-    #l2_loss += tf.nn.l2_loss(W_conv1)
+    l2_loss += tf.nn.l2_loss(W_conv1)
 
     conv1 = new_maxpool2d(conv1)
     #print('conv1_pool = '+str(conv1.get_shape()))
 
-    conv2, W_conv2 = new_conv2d(pre_layer=conv1, filter_size=3, nb_chanels_input=32, nb_filters=32, relu=False, n_scope='conv2')
+    conv2, W_conv2 = new_conv2d(pre_layer=conv1, filter_size=3, nb_chanels_input=32, nb_filters=32, n_scope='conv2')
     #print('conv2 = '+str(conv2.get_shape())+"   W_conv2 = "+str(W_conv2.get_shape()))
-    #l2_loss += tf.nn.l2_loss(W_conv2)
+    l2_loss += tf.nn.l2_loss(W_conv2)
 
     conv2 = new_maxpool2d(conv2)
     #print('conv2_pool = '+str(conv2.get_shape()))
 
-    conv3, W_conv3 = new_conv2d(pre_layer=conv2, filter_size=3, nb_chanels_input=32, nb_filters=64, relu=False, n_scope='conv3')
+    conv3, W_conv3 = new_conv2d(pre_layer=conv2, filter_size=3, nb_chanels_input=32, nb_filters=64, n_scope='conv3')
     #print('conv3 = '+str(conv3.get_shape())+"   W_conv3 = "+str(W_conv3.get_shape()))
-    #l2_loss += tf.nn.l2_loss(W_conv3)
+    l2_loss += tf.nn.l2_loss(W_conv3)
 
     conv3 = new_maxpool2d(conv3)
     #print('conv3_pool = '+str(conv3.get_shape()))
 
-    conv4, W_conv4 = new_conv2d(pre_layer=conv3, filter_size=3, nb_chanels_input=64, nb_filters=64, relu=False, n_scope='conv4')
+    conv4, W_conv4 = new_conv2d(pre_layer=conv3, filter_size=3, nb_chanels_input=64, nb_filters=64, n_scope='conv4')
     #print('conv4 = '+str(conv4.get_shape())+"   W_conv4="+str(W_conv4.get_shape()))
-    #l2_loss += tf.nn.l2_loss(W_conv4)
+    l2_loss += tf.nn.l2_loss(W_conv4)
 
     conv4 = new_maxpool2d(conv4)
     #print('conv4_pool = '+str(conv4.get_shape()))
     
-    conv5, W_conv5 = new_conv2d(pre_layer=conv4, filter_size=3, nb_chanels_input=64, nb_filters=128, relu=False, n_scope='conv5')
+    conv5, W_conv5 = new_conv2d(pre_layer=conv4, filter_size=3, nb_chanels_input=64, nb_filters=128, n_scope='conv5')
     #print('conv5 = '+str(conv5.get_shape())+"   W_conv5="+str(W_conv5.get_shape()))
-    #l2_loss += tf.nn.l2_loss(W_conv5)
+    l2_loss += tf.nn.l2_loss(W_conv5)
 
     conv5 = new_maxpool2d(conv5)
     #print('conv5_pool = '+str(conv5.get_shape()))
@@ -118,32 +118,33 @@ def inference(x):
 
     fc1, W_fc1 = new_fc_layer(pre_layer=layer_flat, nb_inputs=nb_dim, nb_outputs= 4096, n_scope='fc1')
     #print('fc1 = '+str(fc1.get_shape()))
-    #l2_loss += tf.nn.l2_loss(W_fc1)
+    l2_loss += tf.nn.l2_loss(W_fc1)
 
     fc1_drop = tf.nn.dropout(fc1, keep_prob_fc1)
     #print('fc1_drop = '+fc1_drop.get_shape())
 
     fc2, W_fc2 = new_fc_layer(pre_layer=fc1_drop, nb_inputs=4096, nb_outputs=4096, n_scope='fc2')
     #print('fc2 = '+fc2.get_shape())
-    #l2_loss += tf.nn.l2_loss(W_fc2)
+    l2_loss += tf.nn.l2_loss(W_fc2)
 
     fc2_drop = tf.nn.dropout(fc2, keep_prob_fc2)
     #print('fc2_drop = '+fc2_drop.get_shape())
     y_conv, W_softmax = new_fc_layer(pre_layer=fc2_drop, nb_inputs=4096, nb_outputs=46, relu= False, n_scope='softmax')
     #print('y_conv = '+str(y_conv.get_shape()))
+    l2_loss += tf.nn.l2_loss(W_softmax)
 
-    #l2_loss = lamb*l2_loss
+    l2_loss = lamb*l2_loss
 
-    return y_conv
+    return y_conv, l2_loss
 
 x = tf.placeholder(tf.float32, [None, img_size, img_size, 1])
 y_ = tf.placeholder(tf.float32, [None, 46])
 
-y_conv = inference(x)
+y_conv, l2_loss = inference(x)
 
-loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y_, logits=y_conv))
+cross_entropy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y_, logits=y_conv))
 
-#loss = cross_entropy_loss + l2_loss
+loss = cross_entropy_loss + l2_loss
 #global_step = tf.contrib.framework.get_or_create_global_step()
 #learning_rate = tf.train.exponential_decay(started_learning_rate, global_step, 100000, 0.96, staircase=False)
 
@@ -154,16 +155,16 @@ true_pred = tf.reduce_sum(tf.cast(correct_pred,tf.float32))
 
 init = tf.global_variables_initializer()
 
-'''
+
 saver = tf.train.Saver()
 save_dir = 'save/'
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
 save_path = os.path.join(save_dir,'best_validation')
-'''
+
 with tf.Session() as sess:
-    #best_validation_accuracy = 0
+    best_validation_accuracy = 0
     sess.run(init)
     for epoch in range(nb_epochs) :
         print('Epoch '+str(epoch)+'/'+str(nb_epochs))
@@ -171,7 +172,7 @@ with tf.Session() as sess:
         perm = np.random.permutation(n_train_samples)
         tmp_loss = 0.0
         nb_true_pred = 0.0
-        #tmp_l2_loss = []
+        printed_l2_loss = 0.0
 
         for i in range(0, n_train_samples, batch_size):
             x_batch = np.asarray(train_sets.data[perm[i:(i+batch_size)]])
@@ -179,7 +180,7 @@ with tf.Session() as sess:
             y_batch = np.zeros((len(x_batch), 46), dtype=np.float32)
             y_batch[np.arange(len(x_batch)), batch_target] = 1.0
             #print('x_batch = '+str(x_batch.shape))
-            tmp_l,tmp_op = sess.run([loss,optimizer], feed_dict ={x: x_batch, y_: y_batch, keep_prob_fc1 : 1-drop_out_prob, keep_prob_fc2 : 1- drop_out_prob})
+            tmp_l, printed_l2_loss, tmp_op = sess.run([loss, l2_loss, optimizer], feed_dict ={x: x_batch, y_: y_batch, keep_prob_fc1 : 1-drop_out_prob, keep_prob_fc2 : 1- drop_out_prob})
 
             tmp_loss += float(tmp_l) * len(x_batch)
             #tmp_l2_loss.append(tmp_l2_ls)
@@ -188,8 +189,8 @@ with tf.Session() as sess:
         train_loss = tmp_loss/n_train_samples
         #train_l2_loss = np.average(tmp_l2_loss)
         train_acc = nb_true_pred/n_train_samples
-        #print('loss: '+str(train_loss)+' - l2-loss: '+str(train_l2_loss)+' - accurancy: '+str(train_acc))
-        print('loss: '+str(train_loss)+' - accurancy: '+str(train_acc))
+        print('train_loss: '+str(train_loss)+' - l2_loss: '+str(printed_l2_loss)+' - train_acc: '+str(train_acc))
+        #print('train_loss: '+str(train_loss)+' - train_acc: '+str(train_acc))
         
         nb_valid_acc = 0.0
         nb_valid_loss = 0.0
@@ -199,7 +200,7 @@ with tf.Session() as sess:
             y_batch = np.zeros((len(x_batch),46), dtype=np.float32)
             y_batch[np.arange(len(x_batch)), batch_target] = 1.0
 
-            valid_loss = sess.run(loss, feed_dict={x: x_batch, y_: y_batch, keep_prob_fc1 : 1, keep_prob_fc2 : 1})
+            valid_loss = sess.run(cross_entropy_loss, feed_dict={x: x_batch, y_: y_batch, keep_prob_fc1 : 1, keep_prob_fc2 : 1})
             nb_valid_loss += float(valid_loss)*len(x_batch)
             nb_valid_acc += true_pred.eval(feed_dict={x: x_batch, y_: y_batch, keep_prob_fc1 : 1, keep_prob_fc2 : 1})
 
@@ -207,6 +208,6 @@ with tf.Session() as sess:
         nb_valid_loss = nb_valid_loss/n_valid_samples
         print('valid_loss: '+str(nb_valid_loss)+' - valid_acc: '+str(nb_valid_acc))
         
-        '''if nb_valid_acc > best_validation_accuracy :
+        if nb_valid_acc > best_validation_accuracy :
             best_validation_accuracy = nb_valid_acc
-            saver.save(sess=sess, save_path=save_path)'''
+            saver.save(sess=sess, save_path=save_path)
