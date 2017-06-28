@@ -169,7 +169,6 @@ with tf.Session() as sess:
         print('Epoch '+str(epoch)+'/'+str(nb_epochs))
         #print('learning rate: '+str(learning_rate.eval()))
         perm = np.random.permutation(n_train_samples)
-        #perm2 = np.random.permutation(n_valid_samples)
         tmp_loss = 0.0
         nb_true_pred = 0.0
         #tmp_l2_loss = []
@@ -195,8 +194,8 @@ with tf.Session() as sess:
         nb_valid_acc = 0.0
         nb_valid_loss = 0.0
         for i in range(0, n_valid_samples, batch_size):
-            x_batch = np.asarray(valid_sets.data[perm2[i:(i+batch_size)]])
-            batch_target = np.asarray(valid_sets.target[perm2[i:(i+batch_size)]])
+            x_batch = np.asarray(valid_sets.data[i:(i+batch_size)])
+            batch_target = np.asarray(valid_sets.target[i:(i+batch_size)])
             y_batch = np.zeros((len(x_batch),46), dtype=np.float32)
             y_batch[np.arange(len(x_batch)), batch_target] = 1.0
 
